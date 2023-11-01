@@ -1,14 +1,12 @@
-import base64
-from importlib.machinery import FrozenImporter
-import string
-import time
 from clear_text_frame import Clear_Text_frame
 from encrypted_frame import Encrypted_frame
+
+import time
+
 from Crypto.Random import get_random_bytes
 from Crypto.Protocol.KDF import PBKDF2
-
 from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
+from Crypto.Util.Padding import pad
 
 
 def chunk_data(data):
@@ -38,31 +36,22 @@ def encrypt_data(clear_frame, iv, aes_cipher):
 
 
 def calculated_mic(clear_frame, iv, aes_cipher):
-    mic = ""
-    salt = b"\xb2\x16\xe8\xef\xca\xe02\xd6\x80\xb6\xd0\x02\x80(\xe64Sd+oZ\xce\xaf\x9e.Q\x9d\xe3{\xb3P\x97"
-    password = "apassword"
-    key = PBKDF2(password, salt, dkLen=32)
-
-    inital_cipher = AES.new(key, AES.MODE_ECB)
-
     encrypted_iv = aes_cipher.encrypt(pad(iv, 32))
-    # xor = encrypted_iv ^ clear_frame.get_source_addr().encode("utf-8")
 
     source_address_encoded = clear_frame.get_source_addr().encode("utf-8")
     xor = bytes([a ^ b for a, b in zip(encrypted_iv, source_address_encoded)])
-    encrypt_xor = inital_cipher.encrypt(pad(xor, AES.block_size))
+    encrypt_xor = aes_cipher.encrypt(pad(xor, AES.block_size))
 
-    # xor = encrypt_xor ^ clear_frame.get_dest_addr().encode("utf-8")
     destination_address_encoded = clear_frame.get_dest_addr().encode("utf-8")
     xor = bytes([a ^ b for a, b in zip(encrypt_xor, destination_address_encoded)])
     data_chunks = chunk_data(clear_frame.data)
 
     for i in range(len(data_chunks)):
-        encrypt_xor = inital_cipher.encrypt(pad(xor, 32))
+        encrypt_xor = aes_cipher.encrypt(pad(xor, 32))
         # xor = encrypt_xor ^ data_chunks[i].encode("utf-8")
         xor = bytes([a ^ b for a, b in zip(encrypt_xor, data_chunks[i])])
 
-    resulting_mic = inital_cipher.encrypt(pad(xor, 32))
+    resulting_mic = aes_cipher.encrypt(pad(xor, 32))
     zero = 0
     zero_representation = format(zero, "03d")
     pl_zero = iv[:125] + zero_representation.encode("utf-8")
@@ -104,16 +93,31 @@ def encyption_proccess(source_address, destination_adress, data):
     )
 
     print("your data will now we encrypted, please wait a few seconds :)")
-    time.sleep(5)
+    time.sleep(4)
     print("...")
-    time.sleep(5)
+    time.sleep(3)
     print("data is still encypting, this isn't easy be patient :D")
-    time.sleep(5)
+    time.sleep(2)
     print("it took a while but this is how your data looks in hex:")
     print(encrypted_frame.get_encrypted_data().hex())
     print("and this is your calculated mic also in hex:")
     print(encrypted_frame.get_mic().hex())
     return encrypted_frame, iv, inital_cipher
+
+
+def authenticate(encrypted_frame, iv, aes_cipher):
+    target_mic = encrypted_frame.get_mic()
+    decrypted_payload = decrypt_frame(encrypted_frame, iv, aes_cipher)
+    decrypted_frame = Clear_Text_frame(
+        source_address=encrypted_frame.get_encrypted_source_addr(),
+        destination_address=encrypted_frame.get_encrypted_destination_addr(),
+        data=decrypted_payload.decode("utf-8"),
+    )
+    calculated_mic(decrypted_frame, iv, aes_cipher)
+    if target_mic == calculated_mic(decrypted_frame, iv, aes_cipher):
+        return True
+    else:
+        return False
 
 
 if __name__ == "__main__":
@@ -129,16 +133,15 @@ if __name__ == "__main__":
     )
 
     y_n = input(
-        "do you want me to decrypted for you to see if it is really your data? y/n\n"
+        "do you want me to decrypt it for you to see if it is really your data? y/n\n"
     )
     if y_n == "y":
         print("wait a few seconds now")
-        time.sleep(5)
+        time.sleep(3)
         print("this time i was fast , this is your data:")
         print(decrypt_frame(encrypted_frame, iv, inital_cipher).decode("utf-8"))
-    # print(encrypted_frame.get_encrypted_data().hex())
-    # print(encrypted_frame.get_mic().hex())
 
-    # print(decrypt_frame(encrypted_frame, iv, inital_cipher).decode("utf-8"))
-
-    # Encode the decrypted data in Base64
+    if authenticate(encrypted_frame, iv, inital_cipher):
+        print("this message is authenticated")
+    else:
+        print("this message is not authenticated")
